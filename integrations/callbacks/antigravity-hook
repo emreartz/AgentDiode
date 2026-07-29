@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -17,6 +18,18 @@ STATE_MAP = {
     "PostInvocation": "running",
     "Stop": "completed",
 }
+
+
+def _socket_path() -> Path:
+    override = os.environ.get("AGENTDIODE_SOCKET")
+    if override:
+        return Path(override)
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime_dir:
+        return Path(runtime_dir) / "agentdiode" / "agentdiode.sock"
+    if sys.platform == "darwin":
+        return Path(tempfile.gettempdir()) / "agentdiode" / "agentdiode.sock"
+    return Path(f"/run/user/{os.getuid()}") / "agentdiode" / "agentdiode.sock"
 
 
 def main() -> int:
@@ -30,8 +43,7 @@ def main() -> int:
         cwd = workspace_paths[0] if isinstance(workspace_paths, list) and workspace_paths else ""
         tool_call = payload.get("toolCall")
         tool_name = tool_call.get("name") if isinstance(tool_call, dict) else None
-        runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
-        target = Path(os.environ.get("AGENTDIODE_SOCKET", runtime / "agentdiode/agentdiode.sock"))
+        target = _socket_path()
         event = {
             "protocol_version": 1,
             "event": f"session.{state}",

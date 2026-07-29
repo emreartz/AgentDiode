@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+: "${HOME:?HOME must be set}"
+
 keep_data=true
-restore_integrations=false
+restore_integrations=true
 manage_services=true
 for argument in "$@"; do
   case "$argument" in
     --keep-data) keep_data=true ;;
     --remove-data) keep_data=false ;;
+    # --restore-integrations is accepted for backward compatibility; it is
+    # now the default, so it is a no-op. Use --keep-integrations to opt out.
     --restore-integrations) restore_integrations=true ;;
+    --keep-integrations) restore_integrations=false ;;
     --no-services) manage_services=false ;;
     *)
       printf 'Unknown option: %s\n' "$argument" >&2
@@ -17,41 +22,114 @@ for argument in "$@"; do
   esac
 done
 
+os_name="$(uname -s)"
+
 install_root="${XDG_DATA_HOME:-$HOME/.local/share}/agentdiode"
-systemd_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+venv_dir="$install_root/venv"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/agentdiode"
+if [[ "$os_name" == "Darwin" ]]; then
+  state_dir="$HOME/Library/Application Support/agentdiode"
+fi
 hooks_file="$HOME/.codex/hooks.json"
 
-if "$restore_integrations" && [[ -x "$install_root/venv/bin/agentdiode" ]]; then
-  "$install_root/venv/bin/agentdiode" integrations remove codex --hooks-file "$hooks_file"
-  "$install_root/venv/bin/agentdiode" integrations remove claude
-  "$install_root/venv/bin/agentdiode" integrations remove antigravity
+# Refuse to touch anything unless install_root is the specific path we
+# expect (never empty/HOME/root) -- guards rm -rf below against a broken
+# or hijacked XDG_DATA_HOME/HOME environment.
+case "$install_root" in
+  */agentdiode) : ;;
+  *)
+    printf 'agentdiode: refusing to uninstall, unexpected install path: %s\n' "$install_root" >&2
+    exit 1
+    ;;
+esac
+if [[ "$install_root" == "$HOME" || "$install_root" == "/" || -z "$install_root" ]]; then
+  printf 'agentdiode: refusing to uninstall, unsafe install path: %s\n' "$install_root" >&2
+  exit 1
 fi
 
-if "$manage_services"; then
-  systemctl --user disable --now agentdiode-tray.service 2>/dev/null || true
-  systemctl --user disable --now agentdiode-daemon.service 2>/dev/null || true
-fi
-
-for target in \
-  "$HOME/.local/bin/agentdiode" \
-  "$HOME/.local/bin/agentdiode-daemon" \
-  "$HOME/.local/bin/agentdiode-tray" \
-  "$systemd_dir/agentdiode-daemon.service" \
-  "$systemd_dir/agentdiode-tray.service" \
-  "${XDG_DATA_HOME:-$HOME/.local/share}/applications/io.agentdiode.AgentDiode.desktop" \
-  "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps/io.agentdiode.AgentDiode.svg"
-do
-  if [[ -L "$target" || -f "$target" ]]; then
-    rm -- "$target"
+# Only remove a symlink we can confirm install.sh created, i.e. one whose
+# target text still points inside our own venv_dir (install.sh writes these
+# symlinks using this exact same, uncanonicalized path). Deliberately not
+# using `readlink -f`: on macOS it canonicalizes ancestor symlinks like
+# /var -> /private/var, which would make this path-prefix check pass or
+# fail for reasons unrelated to who owns the file. Leaves alone anything
+# else that happens to occupy the same filename (another tool, a user's
+# own script), and dangling symlinks left by a prior partial uninstall are
+# still recognized since we're comparing link text, not resolving it.
+remove_owned_link() {
+  local target="$1"
+  if [[ -L "$target" ]]; then
+    local link_text
+    link_text="$(readlink -- "$target" 2>/dev/null || true)"
+    case "$link_text" in
+      "$venv_dir"/*) rm -- "$target" ;;
+      *) printf 'agentdiode: leaving unrecognized symlink in place: %s\n' "$target" >&2 ;;
+    esac
+  elif [[ -f "$target" ]]; then
+    printf 'agentdiode: leaving unexpected non-symlink in place: %s\n' "$target" >&2
   fi
-done
+}
+
+# Only remove a launchd/systemd unit file if its contents actually reference
+# this project, so a same-named file that isn't ours is never touched.
+remove_owned_unit() {
+  local target="$1"
+  local marker="$2"
+  if [[ -f "$target" ]] && grep -qF -- "$marker" "$target" 2>/dev/null; then
+    rm -- "$target"
+  elif [[ -f "$target" ]]; then
+    printf 'agentdiode: leaving unexpected file in place: %s\n' "$target" >&2
+  fi
+}
+
+if "$restore_integrations"; then
+  if [[ -x "$venv_dir/bin/agentdiode" ]]; then
+    "$venv_dir/bin/agentdiode" integrations remove codex --hooks-file "$hooks_file"
+    "$venv_dir/bin/agentdiode" integrations remove claude
+    "$venv_dir/bin/agentdiode" integrations remove antigravity
+  else
+    printf 'agentdiode: %s not found, could not remove lifecycle hooks automatically\n' \
+      "$venv_dir/bin/agentdiode" >&2
+  fi
+fi
+
+if [[ "$os_name" == "Darwin" ]]; then
+  agents_dir="$HOME/Library/LaunchAgents"
+  if "$manage_services"; then
+    for unit in io.agentdiode.tray io.agentdiode.daemon; do
+      launchctl bootout "gui/$(id -u)/$unit" >/dev/null 2>&1 || true
+    done
+  fi
+  for executable in agentdiode agentdiode-daemon agentdiode-tray; do
+    remove_owned_link "$HOME/.local/bin/$executable"
+  done
+  remove_owned_unit "$agents_dir/io.agentdiode.daemon.plist" "<string>io.agentdiode.daemon</string>"
+  remove_owned_unit "$agents_dir/io.agentdiode.tray.plist" "<string>io.agentdiode.tray</string>"
+else
+  systemd_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+  if "$manage_services"; then
+    systemctl --user disable --now agentdiode-tray.service 2>/dev/null || true
+    systemctl --user disable --now agentdiode-daemon.service 2>/dev/null || true
+  fi
+  for executable in agentdiode agentdiode-daemon agentdiode-tray; do
+    remove_owned_link "$HOME/.local/bin/$executable"
+  done
+  remove_owned_unit "$systemd_dir/agentdiode-daemon.service" "agentdiode-daemon"
+  remove_owned_unit "$systemd_dir/agentdiode-tray.service" "agentdiode-tray"
+  remove_owned_unit \
+    "${XDG_DATA_HOME:-$HOME/.local/share}/applications/io.agentdiode.AgentDiode.desktop" \
+    "io.agentdiode.AgentDiode"
+  icon_file="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps/io.agentdiode.AgentDiode.svg"
+  if [[ -f "$icon_file" ]]; then
+    rm -- "$icon_file"
+  fi
+  if "$manage_services"; then
+    systemctl --user daemon-reload
+  fi
+fi
 
 if [[ -d "$install_root" ]]; then
   rm -rf -- "$install_root"
-fi
-if "$manage_services"; then
-  systemctl --user daemon-reload
 fi
 
 if ! "$keep_data" && [[ -d "$state_dir" ]]; then
@@ -66,4 +144,9 @@ fi
 printf '%s\n' "AgentDiode application files removed."
 if "$keep_data"; then
   printf 'History preserved in %s\n' "$state_dir"
+fi
+if "$restore_integrations"; then
+  printf 'Codex/Claude Code/Antigravity lifecycle hooks removed.\n'
+else
+  printf 'Codex/Claude Code/Antigravity lifecycle hooks left in place (--keep-integrations).\n'
 fi

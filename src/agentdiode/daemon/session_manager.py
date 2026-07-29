@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from agentdiode.constants import TERMINAL_STATES
@@ -7,6 +8,14 @@ from agentdiode.daemon.process_monitor import process_matches, process_start_tic
 from agentdiode.models import Session, aggregate_state, project_name
 from agentdiode.protocol import Event, ProtocolError
 from agentdiode.storage.database import Database
+
+LOGGER = logging.getLogger("agentdiode.daemon")
+
+# States that mean "this session is definitively over" — the underlying
+# CLI/agent process ended (idle) or finished a turn (completed). They are
+# auto-hidden from snapshots after a short grace period and then pruned
+# outright, so a closed terminal disappears from the tray on its own.
+FINISHED_STATES = frozenset({"completed", "idle"})
 
 
 class SessionManager:
@@ -67,22 +76,31 @@ class SessionManager:
 
     def snapshot(self, completed_display_seconds: int = 8) -> dict[str, object]:
         items = sorted(self.sessions.values(), key=lambda item: item.updated_at, reverse=True)
-        visible = []
-        now = datetime.now().astimezone()
-        for item in items:
-            if item.state != "completed" or not item.completed_at:
-                visible.append(item)
-                continue
-            completed = datetime.fromisoformat(item.completed_at)
-            if (now - completed).total_seconds() <= completed_display_seconds:
-                visible.append(item)
+        visible = [
+            item for item in items if self._is_visible(item, completed_display_seconds)
+        ]
         state = aggregate_state(visible)
-        return {"overall_state": state, "sessions": [item.to_dict() for item in items]}
+        return {"overall_state": state, "sessions": [item.to_dict() for item in visible]}
+
+    def _is_visible(self, item: Session, display_seconds: int) -> bool:
+        if item.state not in FINISHED_STATES:
+            return True
+        # completed_at may be missing on rows written before a state was
+        # added to TERMINAL_STATES; updated_at is always set and is a fine
+        # anchor for "since when has this been finished".
+        anchor = item.completed_at or item.updated_at
+        ended = datetime.fromisoformat(anchor)
+        now = datetime.now().astimezone()
+        return (now - ended).total_seconds() <= display_seconds
+
+    def _remove(self, session_id: str) -> None:
+        self.sessions.pop(session_id, None)
+        self.database.remove(session_id)
 
     def mark_stale(self, timeout_seconds: int) -> list[Session]:
         now = datetime.now().astimezone()
         changed = []
-        for session in self.sessions.values():
+        for session in list(self.sessions.values()):
             if session.state not in {"starting", "running", "waiting_input", "waiting_approval"}:
                 continue
             updated = datetime.fromisoformat(session.updated_at)
@@ -95,11 +113,27 @@ class SessionManager:
             )
             if not timed_out and not process_invalid:
                 continue
+            if process_invalid:
+                # The tracked process is confirmed gone (not merely quiet) —
+                # drop it outright instead of leaving a stale entry that
+                # needs a manual "Remove stale session" click.
+                LOGGER.info("Session %s removed (process no longer running)", session.session_id)
+                self._remove(session.session_id)
+                continue
             session.state = "stale"
             session.updated_at = now.isoformat()
             self.database.save(session, "session.stale", {"reason": "heartbeat_timeout"})
             changed.append(session)
         return changed
+
+    def prune_finished(self, display_seconds: int) -> list[str]:
+        removed = []
+        for session in list(self.sessions.values()):
+            if self._is_visible(session, display_seconds):
+                continue
+            removed.append(session.session_id)
+            self._remove(session.session_id)
+        return removed
 
     def reconcile_startup(self) -> list[Session]:
         changed = []

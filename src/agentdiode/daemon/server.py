@@ -64,6 +64,7 @@ class Server:
 
     async def monitor_stale(self, stop: asyncio.Event) -> None:
         timeout_seconds = self.config.general.stale_timeout_seconds
+        display_seconds = self.config.general.completed_display_seconds
         while not stop.is_set():
             try:
                 await asyncio.wait_for(stop.wait(), timeout=min(30, timeout_seconds))
@@ -71,6 +72,9 @@ class Server:
                 changed = self.manager.mark_stale(timeout_seconds)
                 for session in changed:
                     LOGGER.warning("Session %s became stale", session.session_id)
+                removed = self.manager.prune_finished(display_seconds)
+                for session_id in removed:
+                    LOGGER.info("Session %s pruned (finished)", session_id)
 
 
 async def serve() -> None:

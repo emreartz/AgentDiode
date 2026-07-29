@@ -41,6 +41,6 @@ STATE_PRIORITY = {
     "idle": 20,
     "unknown": 10,
 }
-TERMINAL_STATES = frozenset({"completed", "error", "disconnected"})
+TERMINAL_STATES = frozenset({"completed", "error", "disconnected", "idle"})
 MAX_LINE_BYTES = 256 * 1024
 MAX_METADATA_BYTES = 64 * 1024

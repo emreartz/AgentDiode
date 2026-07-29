@@ -32,12 +32,16 @@ class TrayController:
         self.frame = True
         self.dialogs: list[SessionDialog] = []
         self.windows: list[Any] = []
+        self.latest_snapshot: dict[str, Any] | None = None
+        self.menu_open = False
         self.socket = QLocalSocket()
         self.socket.readyRead.connect(self._read_response)
         self.socket.errorOccurred.connect(self._request_finished)
         self.tray = QSystemTrayIcon(render_icon("idle"), app)
         self.tray.setToolTip("AgentDiode\nConnecting to daemon…")
         self.menu = QMenu()
+        self.menu.aboutToShow.connect(self._on_menu_about_to_show)
+        self.menu.aboutToHide.connect(self._on_menu_about_to_hide)
         self.tray.setContextMenu(self.menu)
         self.tray.show()
         self.poll_timer = QTimer()
@@ -77,47 +81,78 @@ class TrayController:
 
     def update(self, snapshot: dict[str, Any]) -> None:
         self.state = snapshot["overall_state"]
-        self.tray.setIcon(render_icon(self.state))
-        self.tray.setToolTip(build_tooltip(snapshot))
+        self.latest_snapshot = snapshot
+        # On macOS, changing the status item's icon/tooltip (or rebuilding
+        # its menu) while the menu is open can make the OS close or
+        # reposition it under the cursor. While it is open we only cache the
+        # latest snapshot; _on_menu_about_to_hide() applies it once closed.
+        if self.menu_open:
+            return
+        self._apply_snapshot()
+
+    def _apply_snapshot(self) -> None:
+        if self.latest_snapshot is None:
+            return
+        self.tray.setIcon(render_icon(self.state, self.frame))
+        self.tray.setToolTip(build_tooltip(self.latest_snapshot))
+
+    def _on_menu_about_to_show(self) -> None:
+        self.menu_open = True
+        self._render_menu()
+
+    def _on_menu_about_to_hide(self) -> None:
+        self.menu_open = False
+        self._apply_snapshot()
+
+    def _render_menu(self) -> None:
+        snapshot = self.latest_snapshot
         self.menu.clear()
         title = self.menu.addAction("AgentDiode")
         title.setEnabled(False)
         self.menu.addSeparator()
-        sessions = snapshot.get("sessions", [])
-        if not sessions:
-            empty = self.menu.addAction("No sessions")
-            empty.setEnabled(False)
-        for item in sessions:
-            label = f"{item['agent_name']} — {item['state'].replace('_', ' ').upper()}"
-            submenu = self.menu.addMenu(label)
-            subtitle = submenu.addAction(
-                f"{item['project_name'] or '-'} · {duration(item['duration_seconds'])}"
-            )
-            subtitle.setEnabled(False)
-            submenu.addSeparator()
-            details = submenu.addAction("Open details")
-            details.triggered.connect(lambda _checked=False, value=item: self.show_details(value))
-            if item.get("cwd"):
-                open_folder = submenu.addAction("Open project folder")
-                open_folder.triggered.connect(
-                    lambda _checked=False, value=item["cwd"]: QDesktopServices.openUrl(
-                        QUrl.fromLocalFile(value)
+        if snapshot is None:
+            connecting = self.menu.addAction("Connecting to daemon…")
+            connecting.setEnabled(False)
+        else:
+            sessions = snapshot.get("sessions", [])
+            if not sessions:
+                empty = self.menu.addAction("No sessions")
+                empty.setEnabled(False)
+            for item in sessions:
+                label = f"{item['agent_name']} — {item['state'].replace('_', ' ').upper()}"
+                submenu = self.menu.addMenu(label)
+                subtitle = submenu.addAction(
+                    f"{item['project_name'] or '-'} · {duration(item['duration_seconds'])}"
+                )
+                subtitle.setEnabled(False)
+                submenu.addSeparator()
+                details = submenu.addAction("Open details")
+                details.triggered.connect(
+                    lambda _checked=False, value=item: self.show_details(value)
+                )
+                if item.get("cwd"):
+                    open_folder = submenu.addAction("Open project folder")
+                    open_folder.triggered.connect(
+                        lambda _checked=False, value=item["cwd"]: QDesktopServices.openUrl(
+                            QUrl.fromLocalFile(value)
+                        )
                     )
-                )
-                copy_path = submenu.addAction("Copy project path")
-                copy_path.triggered.connect(
-                    lambda _checked=False, value=item["cwd"]: self.app.clipboard().setText(value)
-                )
-            if item["state"] not in {"completed", "error", "idle"}:
-                complete = submenu.addAction("Mark completed")
-                complete.triggered.connect(
-                    lambda _checked=False, value=item: self.session_event(value, "completed")
-                )
-            if item["state"] in {"stale", "disconnected"}:
-                remove = submenu.addAction("Remove stale session")
-                remove.triggered.connect(
-                    lambda _checked=False, value=item: self.session_event(value, "remove")
-                )
+                    copy_path = submenu.addAction("Copy project path")
+                    copy_path.triggered.connect(
+                        lambda _checked=False, value=item["cwd"]: self.app.clipboard().setText(
+                            value
+                        )
+                    )
+                if item["state"] not in {"completed", "error", "idle"}:
+                    complete = submenu.addAction("Mark completed")
+                    complete.triggered.connect(
+                        lambda _checked=False, value=item: self.session_event(value, "completed")
+                    )
+                if item["state"] in {"stale", "disconnected"}:
+                    remove = submenu.addAction("Remove stale session")
+                    remove.triggered.connect(
+                        lambda _checked=False, value=item: self.session_event(value, "remove")
+                    )
         self.menu.addSeparator()
         history = self.menu.addAction("Open history")
         history.triggered.connect(self.show_history)
@@ -190,6 +225,8 @@ class TrayController:
         self.tray.setIcon(render_icon(self.state))
 
     def animate(self) -> None:
+        if self.menu_open:
+            return
         if self.state not in ANIMATED:
             return
         if self.state in {"starting", "running"} and not self.config.tray.blink_running:
@@ -207,7 +244,7 @@ def main() -> int:
     configure_logging("tray")
     app = QApplication(sys.argv)
     available_fonts = set(QFontDatabase.families())
-    for family in ("Noto Sans", "DejaVu Sans"):
+    for family in ("Noto Sans", "DejaVu Sans", "SF Pro Text", "Helvetica Neue"):
         if family in available_fonts:
             app.setFont(QFont(family))
             break
