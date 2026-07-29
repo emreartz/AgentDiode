@@ -232,17 +232,19 @@ replacing the entire file.
 Remove AgentDiode while preserving history:
 
 ```bash
-./uninstall.sh --keep-data --restore-integrations
+./uninstall.sh --keep-data
 ```
 
 Remove history after an explicit confirmation:
 
 ```bash
-./uninstall.sh --remove-data --restore-integrations
+./uninstall.sh --remove-data
 ```
 
-The uninstaller removes only AgentDiode hook entries and preserves unrelated
-agent configuration.
+By default this also removes the Codex/Claude Code/Antigravity lifecycle
+hooks it installed (only its own `agentdiode-*` hook entries; unrelated
+hooks and settings are preserved). Pass `--keep-integrations` to leave the
+hooks in place instead.
 
 ## Development
 

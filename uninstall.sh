@@ -4,13 +4,16 @@ set -euo pipefail
 : "${HOME:?HOME must be set}"
 
 keep_data=true
-restore_integrations=false
+restore_integrations=true
 manage_services=true
 for argument in "$@"; do
   case "$argument" in
     --keep-data) keep_data=true ;;
     --remove-data) keep_data=false ;;
+    # --restore-integrations is accepted for backward compatibility; it is
+    # now the default, so it is a no-op. Use --keep-integrations to opt out.
     --restore-integrations) restore_integrations=true ;;
+    --keep-integrations) restore_integrations=false ;;
     --no-services) manage_services=false ;;
     *)
       printf 'Unknown option: %s\n' "$argument" >&2
@@ -79,10 +82,15 @@ remove_owned_unit() {
   fi
 }
 
-if "$restore_integrations" && [[ -x "$venv_dir/bin/agentdiode" ]]; then
-  "$venv_dir/bin/agentdiode" integrations remove codex --hooks-file "$hooks_file"
-  "$venv_dir/bin/agentdiode" integrations remove claude
-  "$venv_dir/bin/agentdiode" integrations remove antigravity
+if "$restore_integrations"; then
+  if [[ -x "$venv_dir/bin/agentdiode" ]]; then
+    "$venv_dir/bin/agentdiode" integrations remove codex --hooks-file "$hooks_file"
+    "$venv_dir/bin/agentdiode" integrations remove claude
+    "$venv_dir/bin/agentdiode" integrations remove antigravity
+  else
+    printf 'agentdiode: %s not found, could not remove lifecycle hooks automatically\n' \
+      "$venv_dir/bin/agentdiode" >&2
+  fi
 fi
 
 if [[ "$os_name" == "Darwin" ]]; then
@@ -136,4 +144,9 @@ fi
 printf '%s\n' "AgentDiode application files removed."
 if "$keep_data"; then
   printf 'History preserved in %s\n' "$state_dir"
+fi
+if "$restore_integrations"; then
+  printf 'Codex/Claude Code/Antigravity lifecycle hooks removed.\n'
+else
+  printf 'Codex/Claude Code/Antigravity lifecycle hooks left in place (--keep-integrations).\n'
 fi
