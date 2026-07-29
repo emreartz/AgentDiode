@@ -5,12 +5,16 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agentdiode"
 version = "0.1.0"
-description = "Local-first AI agent status indicator for KDE Plasma"
+description = "Local-first AI agent status indicator for the desktop tray (KDE Plasma on Linux, menu bar on macOS)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{name = "emreartz"}]
 dependencies = []
+classifiers = [
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
+]
 
 [project.urls]
 Homepage = "https://github.com/emreartz/AgentDiode"

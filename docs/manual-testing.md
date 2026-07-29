@@ -4,7 +4,10 @@
 
 ```bash
 agentdiode integrations setup --codex
+# Linux
 systemctl --user restart agentdiode-daemon.service
+# macOS
+launchctl kickstart -k gui/$(id -u)/io.agentdiode.daemon
 codex
 ```
 

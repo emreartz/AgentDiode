@@ -17,9 +17,13 @@ for argument in "$@"; do
   esac
 done
 
+os_name="$(uname -s)"
+
 install_root="${XDG_DATA_HOME:-$HOME/.local/share}/agentdiode"
-systemd_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/agentdiode"
+if [[ "$os_name" == "Darwin" ]]; then
+  state_dir="$HOME/Library/Application Support/agentdiode"
+fi
 hooks_file="$HOME/.codex/hooks.json"
 
 if "$restore_integrations" && [[ -x "$install_root/venv/bin/agentdiode" ]]; then
@@ -28,30 +32,50 @@ if "$restore_integrations" && [[ -x "$install_root/venv/bin/agentdiode" ]]; then
   "$install_root/venv/bin/agentdiode" integrations remove antigravity
 fi
 
-if "$manage_services"; then
-  systemctl --user disable --now agentdiode-tray.service 2>/dev/null || true
-  systemctl --user disable --now agentdiode-daemon.service 2>/dev/null || true
-fi
-
-for target in \
-  "$HOME/.local/bin/agentdiode" \
-  "$HOME/.local/bin/agentdiode-daemon" \
-  "$HOME/.local/bin/agentdiode-tray" \
-  "$systemd_dir/agentdiode-daemon.service" \
-  "$systemd_dir/agentdiode-tray.service" \
-  "${XDG_DATA_HOME:-$HOME/.local/share}/applications/io.agentdiode.AgentDiode.desktop" \
-  "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps/io.agentdiode.AgentDiode.svg"
-do
-  if [[ -L "$target" || -f "$target" ]]; then
-    rm -- "$target"
+if [[ "$os_name" == "Darwin" ]]; then
+  agents_dir="$HOME/Library/LaunchAgents"
+  if "$manage_services"; then
+    for unit in io.agentdiode.tray io.agentdiode.daemon; do
+      launchctl bootout "gui/$(id -u)/$unit" >/dev/null 2>&1 || true
+    done
   fi
-done
+  for target in \
+    "$HOME/.local/bin/agentdiode" \
+    "$HOME/.local/bin/agentdiode-daemon" \
+    "$HOME/.local/bin/agentdiode-tray" \
+    "$agents_dir/io.agentdiode.daemon.plist" \
+    "$agents_dir/io.agentdiode.tray.plist"
+  do
+    if [[ -L "$target" || -f "$target" ]]; then
+      rm -- "$target"
+    fi
+  done
+else
+  systemd_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+  if "$manage_services"; then
+    systemctl --user disable --now agentdiode-tray.service 2>/dev/null || true
+    systemctl --user disable --now agentdiode-daemon.service 2>/dev/null || true
+  fi
+  for target in \
+    "$HOME/.local/bin/agentdiode" \
+    "$HOME/.local/bin/agentdiode-daemon" \
+    "$HOME/.local/bin/agentdiode-tray" \
+    "$systemd_dir/agentdiode-daemon.service" \
+    "$systemd_dir/agentdiode-tray.service" \
+    "${XDG_DATA_HOME:-$HOME/.local/share}/applications/io.agentdiode.AgentDiode.desktop" \
+    "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps/io.agentdiode.AgentDiode.svg"
+  do
+    if [[ -L "$target" || -f "$target" ]]; then
+      rm -- "$target"
+    fi
+  done
+  if "$manage_services"; then
+    systemctl --user daemon-reload
+  fi
+fi
 
 if [[ -d "$install_root" ]]; then
   rm -rf -- "$install_root"
-fi
-if "$manage_services"; then
-  systemctl --user daemon-reload
 fi
 
 if ! "$keep_data" && [[ -d "$state_dir" ]]; then

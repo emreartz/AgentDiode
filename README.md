@@ -2,15 +2,16 @@
   <img src="docs/assets/agentdiode-header.webp" alt="AgentDiode" width="1000">
 </p>
 
-AgentDiode is a lightweight, local-first Linux desktop utility that shows the
-live status of AI coding agents in the KDE Plasma system tray.
+AgentDiode is a lightweight, local-first desktop utility that shows the live
+status of AI coding agents in the system tray — the KDE Plasma tray on Linux,
+or the menu bar on macOS.
 
 It answers a simple question after you switch away from a terminal or editor:
 is the agent still working, waiting for you, finished, or broken?
 
 ![License](https://img.shields.io/badge/license-MIT-yellow)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![Platform](https://img.shields.io/badge/platform-KDE%20Plasma%206-F85149)
+![Platform](https://img.shields.io/badge/platform-KDE%20Plasma%206%20%7C%20macOS%2026%2B-F85149)
 
 ## Features
 
@@ -50,12 +51,20 @@ state while keeping every session visible in the tray menu.
 
 ## Requirements
 
-- Linux
+**Linux**
+
 - KDE Plasma 6
 - Wayland or X11
 - Python 3.11 or newer
 - systemd user services
 - `notify-send` for notification fallback
+
+**macOS**
+
+- macOS 26 (Tahoe) or macOS 27 or newer
+- Python 3.11 or newer
+- launchd (built in; used for the user agents instead of systemd)
+- `osascript` (built in) or `terminal-notifier` for notifications
 
 The installer creates an isolated virtual environment. It does not modify the
 system Python and does not require root access.
@@ -69,6 +78,12 @@ cd AgentDiode
 agentdiode doctor
 agentdiode status
 ```
+
+`install.sh` detects the host OS automatically. On Linux it registers
+`systemd --user` services and a `.desktop` launcher; on macOS it registers
+`~/Library/LaunchAgents` agents and the tray runs from the menu bar instead of
+a `.desktop` entry. Pass `--no-start` to install without starting the
+background services.
 
 Set up Codex:
 

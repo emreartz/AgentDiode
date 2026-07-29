@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import os
+import sys
+import tempfile
 from pathlib import Path
 
 
 def runtime_dir() -> Path:
-    base = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
-    return base / "agentdiode"
+    override = os.environ.get("XDG_RUNTIME_DIR")
+    if override:
+        return Path(override) / "agentdiode"
+    if sys.platform == "darwin":
+        # macOS has no /run/user equivalent; $TMPDIR is already a
+        # per-user, mode-0700 directory managed by the OS.
+        return Path(tempfile.gettempdir()) / "agentdiode"
+    return Path(f"/run/user/{os.getuid()}") / "agentdiode"
 
 
 def socket_path() -> Path:
@@ -15,8 +23,12 @@ def socket_path() -> Path:
 
 
 def state_dir() -> Path:
-    base = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
-    return base / "agentdiode"
+    override = os.environ.get("XDG_STATE_HOME")
+    if override:
+        return Path(override) / "agentdiode"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "agentdiode"
+    return Path.home() / ".local" / "state" / "agentdiode"
 
 
 def database_path() -> Path:

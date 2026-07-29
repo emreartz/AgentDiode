@@ -4,15 +4,31 @@ Run:
 
 ```bash
 agentdiode doctor
+agentdiode logs
+```
+
+Linux:
+
+```bash
 systemctl --user status agentdiode-daemon.service
 systemctl --user status agentdiode-tray.service
-agentdiode logs
+```
+
+macOS:
+
+```bash
+launchctl print gui/$(id -u)/io.agentdiode.daemon
+launchctl print gui/$(id -u)/io.agentdiode.tray
 ```
 
 If the CLI says the daemon is unavailable:
 
 ```bash
+# Linux
 systemctl --user restart agentdiode-daemon.service
+
+# macOS
+launchctl kickstart -k gui/$(id -u)/io.agentdiode.daemon
 ```
 
 If Codex events do not appear, start a new Codex session, run `/hooks`, inspect

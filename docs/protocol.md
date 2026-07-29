@@ -6,7 +6,9 @@ AgentDiode listens on:
 $XDG_RUNTIME_DIR/agentdiode/agentdiode.sock
 ```
 
-The directory is mode `0700` and the socket mode is `0600`. Requests and
+On macOS, where there is no `XDG_RUNTIME_DIR`/`/run/user` equivalent, it falls
+back to `$TMPDIR/agentdiode/agentdiode.sock`. The directory is mode `0700` and
+the socket mode is `0600`. Requests and
 responses are UTF-8 JSON Lines. Protocol version 1 accepts lifecycle events:
 
 ```json
