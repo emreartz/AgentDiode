@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -11,6 +12,7 @@ from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from agentdiode.tray.application import TrayController, menu_signature
+from agentdiode.tray.icon_renderer import render_icon
 
 
 def fake_snapshot(count: int, *, flip: bool = False, elapsed: int = 0) -> dict[str, Any]:
@@ -42,7 +44,35 @@ def make_controller() -> TrayController:
     controller.latest_snapshot = {}
     controller._menu_signature = None
     controller._subtitles = {}
+    controller._icon_key = ("idle", True)
+    controller._tooltip = ""
     return controller
+
+
+class RecordingTray:
+    """Stands in for QSystemTrayIcon and records the calls the KDE backend reacts to."""
+
+    def __init__(self) -> None:
+        self.icons: list[Any] = []
+        self.tooltips: list[str] = []
+
+    def setIcon(self, icon: Any) -> None:
+        self.icons.append(icon)
+
+    def setToolTip(self, text: str) -> None:
+        self.tooltips.append(text)
+
+
+def recording_controller(state: str = "running") -> tuple[TrayController, RecordingTray]:
+    controller = make_controller()
+    tray = RecordingTray()
+    controller.tray = tray  # type: ignore[assignment]
+    controller.state = state
+    controller.frame = True
+    controller.config = SimpleNamespace(  # type: ignore[assignment]
+        tray=SimpleNamespace(blink_running=True, blink_waiting=True)
+    )
+    return controller, tray
 
 
 def flush() -> None:
@@ -110,3 +140,72 @@ def test_actions_use_latest_session_data_after_in_place_update() -> None:
     details.trigger()
     assert shown[0]["session_id"] == "s1"
     assert shown[0]["duration_seconds"] == 601
+
+
+def test_render_icon_is_cached_per_state_brightness_and_size() -> None:
+    QApplication.instance() or QApplication([])
+    assert render_icon("running") is render_icon("running")
+    assert render_icon("running", False) is render_icon("running", False)
+    assert render_icon("running") is not render_icon("running", False)
+    assert render_icon("running") is not render_icon("error")
+    assert render_icon("running", True, 32) is not render_icon("running", True, 22)
+
+
+def test_idle_polls_do_not_repeat_icon_or_tooltip_updates() -> None:
+    controller, tray = recording_controller()
+    idle = {"overall_state": "idle", "sessions": []}
+    for _ in range(50):
+        controller.update(idle)
+    assert len(tray.icons) == 0  # the controller already shows the idle icon
+    assert len(tray.tooltips) == 1
+    controller.update({"overall_state": "idle", "sessions": []})
+    assert (len(tray.icons), len(tray.tooltips)) == (0, 1)
+
+
+def test_unchanged_state_sets_icon_once_but_tooltip_follows_durations() -> None:
+    controller, tray = recording_controller()
+    for tick in range(10):
+        controller.update(fake_snapshot(2, elapsed=tick * 60))
+    assert len(tray.icons) == 1  # idle -> running once, then never again
+    assert len(tray.tooltips) == 10  # durations changed, so the tooltip must follow
+    assert tray.tooltips[-1] != tray.tooltips[0]
+
+
+def test_state_change_updates_icon_and_reuses_cached_objects() -> None:
+    controller, tray = recording_controller()
+    snapshot = fake_snapshot(1)
+    controller.update(snapshot)
+    controller.update({**snapshot, "overall_state": "error"})
+    controller.update({**snapshot, "overall_state": "running"})
+    controller.update({**snapshot, "overall_state": "error"})
+    assert tray.icons[0] is render_icon("running", True)
+    assert tray.icons[1] is render_icon("error", True)
+    assert tray.icons[3] is tray.icons[1]  # same object, not a fresh QIcon
+
+
+def test_blink_animation_still_alternates_cached_icons() -> None:
+    controller, tray = recording_controller()
+    controller.update(fake_snapshot(1))
+    tray.icons.clear()
+    for _ in range(4):
+        controller.animate()
+    assert tray.icons == [render_icon("running", False), render_icon("running", True)] * 2
+    assert len({id(icon) for icon in tray.icons}) == 2
+
+
+def test_poll_during_dim_blink_frame_restores_bright_icon() -> None:
+    controller, tray = recording_controller()
+    controller.update(fake_snapshot(1))
+    controller.animate()  # dim frame
+    controller.update(fake_snapshot(1, elapsed=5))
+    assert tray.icons[-1] is render_icon("running", True)
+
+
+def test_tooltip_cache_stays_coherent_after_error_tooltip() -> None:
+    controller, tray = recording_controller()
+    idle = {"overall_state": "idle", "sessions": []}
+    controller.update(idle)
+    controller._set_tooltip("AgentDiode\nInvalid daemon response")
+    controller.update(idle)
+    assert tray.tooltips[-1] == "AgentDiode\nNo active AI agents"
+    assert len(tray.tooltips) == 3

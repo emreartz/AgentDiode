@@ -58,7 +58,9 @@ class TrayController:
         self.socket.readyRead.connect(self._read_response)
         self.socket.errorOccurred.connect(self._request_finished)
         self.tray = QSystemTrayIcon(render_icon("idle"), app)
-        self.tray.setToolTip("AgentDiode\nConnecting to daemon…")
+        self._icon_key: tuple[str, bool] = ("idle", True)
+        self._tooltip = "AgentDiode\nConnecting to daemon…"
+        self.tray.setToolTip(self._tooltip)
         self.menu = QMenu()
         self.tray.setContextMenu(self.menu)
         self.tray.show()
@@ -91,7 +93,7 @@ class TrayController:
             if snapshot.get("ok"):
                 self.update(snapshot)
         except (json.JSONDecodeError, TypeError):
-            self.tray.setToolTip("AgentDiode\nInvalid daemon response")
+            self._set_tooltip("AgentDiode\nInvalid daemon response")
         self._request_finished()
 
     def _request_finished(self, *_args: object) -> None:
@@ -100,8 +102,8 @@ class TrayController:
     def update(self, snapshot: dict[str, Any]) -> None:
         self.state = snapshot["overall_state"]
         self.latest_snapshot = snapshot
-        self.tray.setIcon(render_icon(self.state))
-        self.tray.setToolTip(build_tooltip(snapshot))
+        self._set_icon(self.state)
+        self._set_tooltip(build_tooltip(snapshot))
         signature = menu_signature(snapshot)
         if signature != self._menu_signature:
             self._render_menu(snapshot, signature)
@@ -110,6 +112,19 @@ class TrayController:
         # existing actions in place instead of creating a new menu tree.
         for item in snapshot.get("sessions", []):
             self._subtitles[str(item["session_id"])].setText(subtitle_text(item))
+
+    def _set_icon(self, state: str, bright: bool = True) -> None:
+        # Every setIcon()/setToolTip() makes the KDE tray backend emit D-Bus signals and
+        # re-serialize the icon, so only call them when the displayed value changes.
+        key = (state, bright)
+        if key != self._icon_key:
+            self.tray.setIcon(render_icon(state, bright))
+            self._icon_key = key
+
+    def _set_tooltip(self, text: str) -> None:
+        if text != self._tooltip:
+            self.tray.setToolTip(text)
+            self._tooltip = text
 
     def _session(self, session_id: str) -> dict[str, Any] | None:
         item: dict[str, Any]
@@ -249,7 +264,7 @@ class TrayController:
         self.config = load_config()
         self.animation_timer.setInterval(self.config.tray.animation_interval_ms)
         self.frame = True
-        self.tray.setIcon(render_icon(self.state))
+        self._set_icon(self.state)
 
     def animate(self) -> None:
         if self.state not in ANIMATED:
@@ -262,7 +277,7 @@ class TrayController:
         ):
             return
         self.frame = not self.frame
-        self.tray.setIcon(render_icon(self.state, self.frame))
+        self._set_icon(self.state, self.frame)
 
 
 def main() -> int:

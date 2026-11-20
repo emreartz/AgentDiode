@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import cache
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 
@@ -17,7 +19,10 @@ COLORS = {
 }
 
 
+@cache
 def render_icon(state: str, bright: bool = True, size: int = 22) -> QIcon:
+    # Cached: a new QIcon per call gets a new QPixmapCache key every time the tray
+    # backend asks for its pixmap, so Qt's cache fills with entries that are never reused.
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
