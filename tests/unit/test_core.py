@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,25 @@ def test_concurrent_lifecycle(tmp_path: Path) -> None:
     assert len(snapshot["sessions"]) == 2
     manager.apply(Event(event="session.completed", agent_id="claude", session_id="c2"))
     assert manager.snapshot()["overall_state"] == "running"
+
+
+def test_snapshot_hides_old_completed_sessions(tmp_path: Path) -> None:
+    database = Database(tmp_path / "history.sqlite3")
+    manager = SessionManager(database)
+    old = (datetime.now().astimezone() - timedelta(hours=1)).isoformat()
+    manager.apply(Event(event="session.running", agent_id="codex", session_id="live"))
+    manager.apply(
+        Event(event="session.running", agent_id="codex", session_id="old", timestamp=old)
+    )
+    manager.apply(
+        Event(event="session.completed", agent_id="codex", session_id="old", timestamp=old)
+    )
+    manager.apply(Event(event="session.running", agent_id="claude", session_id="recent"))
+    manager.apply(Event(event="session.completed", agent_id="claude", session_id="recent"))
+    snapshot = manager.snapshot(completed_display_seconds=8)
+    assert {item["session_id"] for item in snapshot["sessions"]} == {"live", "recent"}
+    assert "old" in manager.sessions
+    assert {item["session_id"] for item in database.history()} == {"live", "old", "recent"}
 
 
 def test_heartbeat_requires_session(tmp_path: Path) -> None:

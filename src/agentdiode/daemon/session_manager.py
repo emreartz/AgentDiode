@@ -77,7 +77,7 @@ class SessionManager:
             if (now - completed).total_seconds() <= completed_display_seconds:
                 visible.append(item)
         state = aggregate_state(visible)
-        return {"overall_state": state, "sessions": [item.to_dict() for item in items]}
+        return {"overall_state": state, "sessions": [item.to_dict() for item in visible]}
 
     def mark_stale(self, timeout_seconds: int) -> list[Session]:
         now = datetime.now().astimezone()

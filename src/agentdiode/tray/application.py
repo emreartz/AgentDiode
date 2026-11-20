@@ -79,6 +79,9 @@ class TrayController:
         self.state = snapshot["overall_state"]
         self.tray.setIcon(render_icon(self.state))
         self.tray.setToolTip(build_tooltip(snapshot))
+        # QMenu.clear() does not delete submenus created with addMenu().
+        for sub in self.menu.findChildren(QMenu):
+            sub.deleteLater()
         self.menu.clear()
         title = self.menu.addAction("AgentDiode")
         title.setEnabled(False)
