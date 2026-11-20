@@ -21,7 +21,7 @@ def build_tooltip(snapshot: dict[str, Any]) -> str:
     for item in active[:6]:
         state = item["state"].replace("_", " ").title()
         lines.append(
-            f"{item['agent_name']}: {state} — {item['project_name'] or '-'}"
-            f" — {duration(item['duration_seconds'])}"
+            f"{item['agent_name']}: {state} - {item['project_name'] or '-'}"
+            f" - {duration(item['duration_seconds'])}"
         )
     return "\n".join(lines)

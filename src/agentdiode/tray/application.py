@@ -157,7 +157,7 @@ class TrayController:
             empty.setEnabled(False)
         for item in sessions:
             sid = str(item["session_id"])
-            label = f"{item['agent_name']} — {item['state'].replace('_', ' ').upper()}"
+            label = f"{item['agent_name']} - {item['state'].replace('_', ' ').upper()}"
             submenu = self.menu.addMenu(label)
             subtitle = submenu.addAction(subtitle_text(item))
             subtitle.setEnabled(False)

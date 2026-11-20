@@ -20,7 +20,7 @@ from agentdiode.tray.tooltip import duration
 class SessionDialog(QDialog):
     def __init__(self, session: dict[str, Any], parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle(f"AgentDiode — {session['agent_name']}")
+        self.setWindowTitle(f"AgentDiode - {session['agent_name']}")
         self.setMinimumWidth(460)
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -28,16 +28,16 @@ class SessionDialog(QDialog):
             ("Agent", session["agent_name"]),
             ("State", session["state"].replace("_", " ").title()),
             ("Reliability", session["reliability"].title()),
-            ("Project", session["project_name"] or "—"),
-            ("Working directory", session["cwd"] or "—"),
+            ("Project", session["project_name"] or "-"),
+            ("Working directory", session["cwd"] or "-"),
             ("Session ID", session["session_id"]),
             ("Started", session["started_at"]),
             ("Last update", session["updated_at"]),
             ("Duration", duration(session["duration_seconds"])),
-            ("PID", str(session.get("pid") or "—")),
-            ("Parent PID", str(session.get("parent_pid") or "—")),
+            ("PID", str(session.get("pid") or "-")),
+            ("Parent PID", str(session.get("parent_pid") or "-")),
             ("Source", session["source"]),
-            ("Error", session.get("error_message") or "—"),
+            ("Error", session.get("error_message") or "-"),
         )
         for name, value in values:
             label = QLabel(str(value))
