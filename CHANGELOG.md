@@ -11,6 +11,8 @@
   icons are now cached and the tray skips redundant icon and tooltip updates.
 - Tray menu actions now always use the latest session data.
 - Replaced em dashes in tray and dialog text with plain hyphens.
+- Python 3.11 installs now use PySide6 older than 6.12. PySide6 6.12.0 leaks references to `None`
+  on Python 3.11, which made the tray abort after enough menu, icon or tooltip updates.
 - The tray menu test is skipped when the optional PySide6 dependency is not installed.
 
 ## 0.1.0
